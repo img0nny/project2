@@ -136,7 +136,7 @@
                         <span class="text-sm font-bold font-sans">메인으로</span>
                     </button>
                     <h2 class="text-3xl title-font text-white mb-2 tracking-wide">팀을 골라주세요.</h2>
-                    <p class="text-slate-400 text-sm mb-8 font-medium">본인 팀의 카드를 터치하세요.</p>
+                    <p class="text-slate-400 text-sm mb-8 font-medium">본인 팀의 전용 카드를 터치하세요.</p>
                     <div class="grid grid-cols-1 gap-4">
             `;
             for (let i = 1; i <= 4; i++) {
@@ -144,8 +144,8 @@
                 const count = box.prizes.length;
                 const isEmpty = count === 0;
                 
-                // 🛡️ [방어 로직] 서버에 구형 데이터가 남아있어도 화면이 깨지지 않게 처리
-                const cleanTitle = box.title.replace(/[🥇🥈🥉🏅4️⃣😅📦\s]/g, '').trim(); 
+                // 🛡️ [수정된 방어 로직] 띄어쓰기 유지, 숫자 4 보존
+                const cleanTitle = box.title.replace(/🥇|🥈|🥉|🏅|4️⃣|😅|📦/g, '').trim(); 
                 const fallbackEmoji = box.id === 1 ? '🥇' : box.id === 2 ? '🥈' : box.id === 3 ? '🥉' : '😅';
                 const displayEmoji = box.emoji || fallbackEmoji;
 
@@ -173,8 +173,8 @@
             window.selectedBoxId = boxId;
             const box = window.boxesData[boxId];
             
-            // 🛡️ [방어 로직] 서버 구형 데이터 방어
-            const cleanTitle = box.title.replace(/[🥇🥈🥉🏅4️⃣😅📦\s]/g, '').trim(); 
+            // 🛡️ [수정된 방어 로직] 띄어쓰기 유지, 숫자 4 보존
+            const cleanTitle = box.title.replace(/🥇|🥈|🥉|🏅|4️⃣|😅|📦/g, '').trim(); 
             const fallbackEmoji = box.id === 1 ? '🥇' : box.id === 2 ? '🥈' : box.id === 3 ? '🥉' : '😅';
             const displayEmoji = box.emoji || fallbackEmoji;
 
@@ -231,6 +231,9 @@
             if (selectedPrize.type === 'jackpot') resultColor = 'from-pink-500 to-rose-500';
             else if (selectedPrize.type === 'good') resultColor = 'from-blue-500 to-indigo-500';
 
+            // 결과창에서도 띄어쓰기와 깔끔한 이름 출력을 위해 방어로직 동일 적용
+            const cleanTitle = boxTitle.replace(/🥇|🥈|🥉|🏅|4️⃣|😅|📦/g, '').trim(); 
+
             appDiv.innerHTML = `
                 <div class="flex-1 flex flex-col justify-center items-center text-center fade-in px-4 py-8">
                     <p class="text-yellow-400 font-bold text-xl mb-4 comic-font tracking-widest">${isAlreadyDrawn ? "나의 당첨 결과" : "🎉 축하합니다! 🎉"}</p>
@@ -239,7 +242,7 @@
                         <div class="absolute inset-0 bg-white/10 opacity-40"></div>
                         <div class="text-[100px] mb-4 relative z-10 drop-shadow-xl animate-bounce">${selectedPrize.icon}</div>
                         <h2 class="text-3xl font-black text-white comic-font tracking-wide relative z-10 break-keep mb-2">${selectedPrize.name}</h2>
-                        <p class="text-white/70 font-bold text-sm relative z-10 opacity-90">${boxTitle}</p>
+                        <p class="text-white/70 font-bold text-sm relative z-10 opacity-90">${cleanTitle}</p>
                     </div>
 
                     <!-- 인증 가이드 박스 -->
