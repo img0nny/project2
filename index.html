@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>볼링대회 랜덤박스</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Jua&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; background-color: #f8fafc; min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; }
+        .title-font { font-family: 'Black Han Sans', sans-serif; }
+        .comic-font { font-family: 'Jua', sans-serif; }
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .pop-up { animation: popUp 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        @keyframes popUp { 0% { transform: scale(0.5); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        .shake { animation: shake 0.5s infinite; }
+        @keyframes shake { 0%, 50%, 100% { transform: rotate(0deg); } 25% { transform: rotate(-5deg); } 75% { transform: rotate(5deg); } }
+    </style>
+</head>
+<body class="bg-slate-900 text-white relative">
+
+    <!-- 라이브 동기화 뱃지 -->
+    <div class="absolute top-4 left-4 flex items-center gap-1 bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full text-xs font-bold border border-emerald-500/30 shadow-lg z-50">
+        <span class="relative flex h-2 w-2">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+        </span>
+        LIVE 동기화 중
+    </div>
+
+    <!-- 진행자용 초기화 버튼 (우측 하단) -->
+    <button onclick="window.resetData()" class="fixed bottom-2 right-2 text-xs text-slate-700 bg-slate-800 px-2 py-1 rounded opacity-50 hover:opacity-100 z-50">
+        서버 전체 초기화
+    </button>
+
+    <div id="app" class="w-full max-w-md mx-auto p-4 flex-1 flex flex-col fade-in pt-12">
+        <!-- 로딩 화면 -->
+        <div class="flex-1 flex justify-center items-center text-slate-400 text-lg font-bold flex-col gap-4">
+            <div class="text-4xl animate-bounce">🎳</div>
+            서버 연결 중... ⚙️
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        // 🔥 runTransaction 추가 (동시 접속 방어용)
+        import { getFirestore, doc, setDoc, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAlrDE_xgT6VBwEQ7AtqEkPfIng6tuK38g",
+            authDomain: "img0nny.firebaseapp.com",
+            projectId: "img0nny",
+            storageBucket: "img0nny.firebasestorage.app",
+            messagingSenderId: "28395677092",
+            appId: "1:28395677092:web:603c15d52699f0fe03cd31"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const docRef = doc(db, "bowling_event", "prizes");
+
+        const initialBoxes = {
+            1: { id: 1, title: "🥇 1등 팀 골드 박스", colorClass: "bg-yellow-500", textClass: "text-yellow-900", prizes: [{ name: "올리브영 5만원", icon: "💄", type: "jackpot" }, { name: "배달의민족 3만원", icon: "🍗", type: "good" }, { name: "스타벅스 1만원", icon: "☕", type: "normal" }, { name: "스타벅스 1만원", icon: "☕", type: "normal" }] },
+            2: { id: 2, title: "🥈 2등 팀 실버 박스", colorClass: "bg-slate-300", textClass: "text-slate-800", prizes: [{ name: "올리브영 3만원", icon: "🌿", type: "good" }, { name: "배달의민족 3만원", icon: "🍗", type: "good" }, { name: "스타벅스 1만원", icon: "☕", type: "normal" }, { name: "스타벅스 1만원", icon: "☕", type: "normal" }] },
+            3: { id: 3, title: "🥉 3등 팀 브론즈 박스", colorClass: "bg-amber-600", textClass: "text-white", prizes: [{ name: "올리브영 3만원", icon: "🌿", type: "good" }, { name: "스타벅스 1만원", icon: "☕", type: "normal" }, { name: "스타벅스 1만원", icon: "☕", type: "normal" }, { name: "스타벅스 1만원", icon: "☕", type: "normal" }] },
+            4: { id: 4, title: "4️⃣ 4등 팀 그린 박스", colorClass: "bg-emerald-500", textClass: "text-white", prizes: [{ name: "배달의민족 3만원", icon: "🍗", type: "good" }, { name: "스타벅스 1만원", icon: "☕", type: "normal" }, { name: "스타벅스 1만원", icon: "☕", type: "normal" }, { name: "스타벅스 1만원", icon: "☕", type: "normal" }] }
+        };
+
+        window.boxesData = null;
+
+        // 🟢 실시간 데이터 수신 및 글로벌 리셋 감지
+        onSnapshot(docRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                window.boxesData = data.boxes;
+
+                // 글로벌 리셋 감지 로직 (진행자가 초기화하면 내 폰 기록도 삭제됨)
+                const serverResetTime = data.lastReset || 0;
+                const localResetTime = localStorage.getItem('lastResetTime') || 0;
+
+                if (serverResetTime > localResetTime) {
+                    localStorage.removeItem('myDrawResult'); // 폰에 남은 기록 삭제
+                    localStorage.setItem('lastResetTime', serverResetTime); // 갱신
+                }
+
+                window.renderMainScreen();
+            } else {
+                setDoc(docRef, { boxes: initialBoxes, lastReset: new Date().getTime() });
+            }
+        });
+
+        const appDiv = document.getElementById('app');
+
+        window.renderMainScreen = function() {
+            if (!window.boxesData) return;
+
+            const hasDrawn = localStorage.getItem('myDrawResult');
+            if (hasDrawn) {
+                const result = JSON.parse(hasDrawn);
+                window.renderResultScreen(result.boxTitle, result.prize, true);
+                return;
+            }
+
+            let html = `
+                <div class="text-center mt-4 mb-8 fade-in">
+                    <h1 class="text-4xl title-font text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-purple-500 mb-2">랜덤 박스 추첨</h1>
+                    <p class="text-slate-400 text-sm">본인 팀의 상자를 <strong class="text-pink-400">단 1번만</strong> 터치하세요!</p>
+                </div>
+                <div class="grid grid-cols-1 gap-4 fade-in">
+            `;
+
+            for (let i = 1; i <= 4; i++) {
+                const box = window.boxesData[i];
+                const count = box.prizes.length;
+                const isEmpty = count === 0;
+
+                html += `
+                    <div onclick="${isEmpty ? '' : `window.renderDrawScreen(${i})`}" 
+                         class="relative rounded-2xl p-6 shadow-lg transition-transform ${isEmpty ? 'bg-slate-800 opacity-50' : box.colorClass + ' cursor-pointer hover:scale-105 active:scale-95'}">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <h2 class="text-2xl font-black ${isEmpty ? 'text-slate-500' : box.textClass} comic-font mb-1">${box.title}</h2>
+                                <p class="${isEmpty ? 'text-slate-600' : box.textClass} opacity-80 text-sm font-bold">
+                                    ${isEmpty ? '모든 상품 소진' : `남은 수량 : ${count} / 4`}
+                                </p>
+                            </div>
+                            <div class="text-5xl ${isEmpty ? 'grayscale' : ''}">📦</div>
+                        </div>
+                    </div>
+                `;
+            }
+            appDiv.innerHTML = html + `</div>`;
+        };
+
+        window.renderDrawScreen = function(boxId) {
+            const box = window.boxesData[boxId];
+            appDiv.innerHTML = `
+                <div class="flex-1 flex flex-col justify-center items-center text-center fade-in">
+                    <button onclick="window.renderMainScreen()" class="absolute top-16 left-4 text-slate-400 hover:text-white flex items-center gap-1 bg-slate-800/50 px-3 py-1.5 rounded-full backdrop-blur-sm">
+                        ◀ 취소
+                    </button>
+                    <h2 class="text-3xl title-font ${box.colorClass.replace('bg-', 'text-')} mb-8">${box.title}</h2>
+                    <div id="drawBox" class="text-8xl mb-12 cursor-pointer drop-shadow-2xl transition-transform hover:scale-110 active:scale-95" onclick="window.executeDraw(${boxId})">
+                        🎁
+                    </div>
+                    <div class="animate-pulse">
+                        <p class="text-xl font-bold text-white comic-font mb-2">상자를 터치해서 뽑아주세요!</p>
+                        <p class="text-sm text-pink-400 font-bold">⚠️ 한 번 뽑으면 취소할 수 없습니다!</p>
+                    </div>
+                </div>
+            `;
+        };
+
+        window.executeDraw = async function(boxId) {
+            if(localStorage.getItem('myDrawResult')) {
+                alert("이미 추첨을 완료하셨습니다.");
+                return;
+            }
+
+            const boxElement = document.getElementById('drawBox');
+            if(boxElement.classList.contains('shake')) return; 
+            boxElement.classList.add('shake');
+
+            try {
+                // 🛡️ Transaction: 여러 명이 동시에 눌러도 절대 중복되지 않도록 서버에서 줄을 세워 처리합니다.
+                const selectedPrize = await runTransaction(db, async (transaction) => {
+                    const sfDoc = await transaction.get(docRef);
+                    if (!sfDoc.exists()) throw "문서 없음";
+
+                    let latestData = sfDoc.data().boxes;
+                    let currentPrizes = latestData[boxId].prizes;
+
+                    if (currentPrizes.length === 0) throw "EMPTY"; // 상품 완전 소진
+
+                    // 랜덤 추첨 및 서버 데이터 업데이트
+                    const randomIndex = Math.floor(Math.random() * currentPrizes.length);
+                    const prize = currentPrizes[randomIndex];
+                    
+                    currentPrizes.splice(randomIndex, 1);
+                    transaction.update(docRef, { boxes: latestData });
+
+                    return prize; // 확보한 상품 정보 반환
+                });
+
+                // 서버에서 상품 확보 성공! 0.8초 애니메이션 대기 후 결과창 보여주기
+                setTimeout(() => {
+                    localStorage.setItem('myDrawResult', JSON.stringify({
+                        boxTitle: window.boxesData[boxId].title,
+                        prize: selectedPrize
+                    }));
+                    window.renderResultScreen(window.boxesData[boxId].title, selectedPrize, false);
+                }, 800);
+
+            } catch (e) {
+                boxElement.classList.remove('shake');
+                if (e === "EMPTY") {
+                    alert("앗! 0.1초 차이로 다른 분이 마지막 상품을 뽑아갔습니다.");
+                    window.renderMainScreen();
+                } else {
+                    alert("통신 오류가 발생했습니다. 다시 터치해 주세요.");
+                }
+            }
+        };
+
+        window.renderResultScreen = function(boxTitle, selectedPrize, isAlreadyDrawn) {
+            let resultColor = 'from-slate-700 to-slate-800';
+            if (selectedPrize.type === 'jackpot') resultColor = 'from-pink-500 to-rose-500';
+            else if (selectedPrize.type === 'good') resultColor = 'from-blue-500 to-indigo-500';
+
+            const headerText = isAlreadyDrawn ? "내 당첨 결과 🎯" : "🎉 축하합니다! 🎉";
+            const subText = isAlreadyDrawn ? "진행자에게 보여주고 상품을 수령하세요." : "이 화면을 캡처하거나 그대로 진행자에게 보여주세요.";
+
+            appDiv.innerHTML = `
+                <div class="flex-1 flex flex-col justify-center items-center text-center fade-in px-4">
+                    <p class="text-yellow-400 font-bold text-xl mb-4 comic-font">${headerText}</p>
+                    <p class="text-slate-400 text-sm mb-6">${subText}</p>
+                    <div class="bg-gradient-to-br ${resultColor} w-full py-12 rounded-3xl shadow-2xl pop-up border border-white/20 relative overflow-hidden">
+                        <div class="absolute inset-0 bg-white/10 opacity-50"></div>
+                        <div class="text-6xl mb-4 relative z-10">${selectedPrize.icon}</div>
+                        <h2 class="text-3xl font-black text-white comic-font tracking-wide relative z-10 break-keep">${selectedPrize.name}</h2>
+                        <p class="mt-4 text-white/80 font-bold text-sm relative z-10">${boxTitle} 당첨</p>
+                    </div>
+                </div>
+            `;
+        };
+
+        window.resetData = async function() {
+            if(confirm("🚨 [진행자 전용] 서버의 모든 수량과 참가자들의 당첨 기록을 싹 초기화합니다. 진행하시겠습니까?")) {
+                const newResetTime = new Date().getTime();
+                await setDoc(docRef, { boxes: initialBoxes, lastReset: newResetTime });
+                alert("초기화 성공! 이제 모든 직원의 폰에서 다시 뽑기가 가능합니다.");
+            }
+        };
+    </script>
+</body>
+</html>
