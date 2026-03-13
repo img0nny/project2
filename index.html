@@ -336,48 +336,66 @@
         window.renderAdminScreen = function() {
             window.currentView = 'admin';
             
-            // 당첨 리스트 HTML 생성
+            // 박스별 그룹화된 당첨 리스트 HTML 생성
             let listHTML = '';
-            if (window.winnersData.length === 0) {
-                listHTML = `<div class="text-slate-500 text-center py-8 text-sm">아직 추첨을 완료한 참여자가 없습니다.</div>`;
-            } else {
-                window.winnersData.forEach((winner, idx) => {
-                    const timeObj = new Date(winner.timestamp);
-                    const timeStr = `${timeObj.getHours().toString().padStart(2, '0')}:${timeObj.getMinutes().toString().padStart(2, '0')}`;
-                    
-                    listHTML += `
-                        <div class="flex items-center justify-between bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
-                            <div class="flex flex-col text-left">
-                                <div class="flex items-center gap-2 mb-1">
-                                    <span class="font-bold text-white text-sm">${winner.nickname}</span>
-                                    <span class="text-[10px] bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full">${winner.boxTitle}</span>
-                                </div>
-                                <div class="text-pink-400 font-bold text-xs flex items-center gap-1">
-                                    <span>${winner.prizeIcon}</span> ${winner.prizeName}
-                                </div>
-                            </div>
-                            <div class="text-xs text-slate-500">${timeStr}</div>
-                        </div>
-                    `;
+            
+            for (let i = 1; i <= 4; i++) {
+                const originalBox = initialBoxes[i];
+                const cleanTitle = originalBox.title.replace(/🥇|🥈|🥉|🏅|4️⃣|😅|📦/g, '').trim();
+                
+                // 1. 해당 박스의 오리지널 상품 구성(개수) 계산
+                const prizeCounts = {};
+                originalBox.prizes.forEach(p => {
+                    prizeCounts[p.name] = (prizeCounts[p.name] || 0) + 1;
                 });
+                const compositionStr = Object.entries(prizeCounts).map(([name, count]) => `${name}(${count})`).join(', ');
+
+                // 2. 이 박스에서 당첨된 사람들의 목록 필터링
+                const boxWinners = window.winnersData.filter(w => w.boxTitle === cleanTitle);
+                let winnersStr = '';
+                if (boxWinners.length > 0) {
+                    winnersStr = boxWinners.map(w => 
+                        `<span class="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-600 shadow-sm whitespace-nowrap text-sm">
+                            <span class="text-pink-400 font-black">${w.prizeName}</span> 
+                            <span class="text-slate-300 font-medium">(${w.nickname})</span>
+                        </span>`
+                    ).join(' ');
+                } else {
+                    winnersStr = '<span class="text-slate-500 text-sm mt-1">아직 당첨자가 없습니다.</span>';
+                }
+
+                // 3. 각 박스별 UI 조립
+                listHTML += `
+                    <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-700/80 mb-4 flex flex-col shadow-md">
+                        <div class="flex justify-between items-center mb-1">
+                            <h4 class="text-yellow-400 font-bold text-xl comic-font drop-shadow-md">${originalBox.emoji} ${cleanTitle}</h4>
+                            <span class="text-[10px] font-bold bg-pink-500/20 text-pink-300 px-2 py-1 rounded-md">
+                                ${boxWinners.length}명 당첨
+                            </span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 mb-3 break-keep bg-slate-800/40 p-2 rounded-lg inline-block">
+                            <span class="font-bold text-slate-300">박스 구성 : </span> ${compositionStr}
+                        </p>
+                        <div class="w-full h-px bg-slate-700/50 mb-3"></div>
+                        <div class="flex flex-wrap gap-2">
+                            ${winnersStr}
+                        </div>
+                    </div>
+                `;
             }
 
             appDiv.innerHTML = `
                 <div class="flex-1 flex flex-col w-full fade-in pb-10">
                     <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-2xl title-font text-white flex items-center gap-2"><span class="text-3xl">⚙️</span> 관리자 대시보드</h2>
-                        <button onclick="window.renderHomeScreen()" class="text-slate-400 text-sm hover:text-white bg-slate-800 px-3 py-1 rounded-full border border-slate-700">닫기 ✖</button>
+                        <h2 class="text-2xl title-font text-white flex items-center gap-2"><span class="text-3xl">⚙️</span> 상품 추첨 확인</h2>
+                        <button onclick="window.renderHomeScreen()" class="text-slate-400 text-sm hover:text-white bg-slate-800 px-3 py-1 rounded-full border border-slate-700 transition-all shadow-md">닫기 ✖</button>
                     </div>
 
-                    <!-- 당첨자 실시간 현황 박스 -->
-                    <div class="bg-slate-800 rounded-2xl border border-slate-700 p-5 mb-6 shadow-xl flex-1 flex flex-col">
-                        <div class="flex justify-between items-end mb-4 border-b border-slate-700 pb-3">
-                            <h3 class="text-pink-400 font-bold comic-font text-lg">🎁 당첨 내역 확인</h3>
-                            <span class="text-xs font-bold bg-pink-500/20 text-pink-300 px-2 py-1 rounded-md">총 ${window.winnersData.length}명</span>
-                        </div>
+                    <!-- 당첨자 실시간 현황 그룹 박스 -->
+                    <div class="bg-slate-800/80 rounded-2xl border border-slate-700 p-4 mb-6 shadow-xl flex-1 flex flex-col backdrop-blur-sm">
                         
                         <!-- 스크롤 가능한 리스트 영역 -->
-                        <div class="flex-1 overflow-y-auto no-scrollbar flex flex-col gap-2 max-h-[50vh]">
+                        <div class="flex-1 overflow-y-auto no-scrollbar flex flex-col max-h-[55vh]">
                             ${listHTML}
                         </div>
                     </div>
