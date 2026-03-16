@@ -17,19 +17,16 @@
         .shake { animation: shake 0.5s infinite; }
         @keyframes shake { 0%, 50%, 100% { transform: rotate(0deg); } 25% { transform: rotate(-5deg); } 75% { transform: rotate(5deg); } }
         
-        /* 효과 스타일 */
         .btn-glow { box-shadow: 0 0 20px rgba(236, 72, 153, 0.4); }
         .result-card { box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5); }
         .cert-box { background: rgba(255, 255, 255, 0.05); border: 1px dashed rgba(255, 255, 255, 0.2); }
         
-        /* 스크롤바 숨기기 (관리자 리스트용) */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
 <body class="relative">
 
-    <!-- 라이브 동기화 뱃지 -->
     <div class="absolute top-4 left-4 flex items-center gap-1 bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full text-[10px] font-bold border border-emerald-500/30 shadow-lg z-50">
         <span class="relative flex h-2 w-2">
             <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -38,13 +35,11 @@
         LIVE 동기화 중
     </div>
 
-    <!-- 관리자용 입장 버튼 -->
     <button onclick="window.enterAdminMode()" class="fixed bottom-2 right-2 text-[10px] text-slate-500 bg-slate-800/50 px-2 py-1 rounded opacity-30 hover:opacity-100 z-50 transition-all">
         관리자 모드
     </button>
 
     <div id="app" class="w-full max-w-md mx-auto p-6 flex-1 flex flex-col pt-12">
-        <!-- 서버 연결 로딩 화면 -->
         <div id="loading-view" class="flex-1 flex justify-center items-center text-slate-400 text-lg font-bold flex-col gap-4">
             <div class="text-5xl animate-bounce">🎳</div>
             <p class="animate-pulse text-sm font-medium text-slate-400">데이터를 동기화 중입니다...</p>
@@ -55,7 +50,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, doc, setDoc, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // 사용자 Firebase 설정
         const firebaseConfig = {
             apiKey: "AIzaSyAlrDE_xgT6VBwEQ7AtqEkPfIng6tuK38g",
             authDomain: "img0nny.firebaseapp.com",
@@ -67,9 +61,12 @@
 
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
-        const docRef = doc(db, "bowling_event", "prizes");
+        
+        // 🌟 3개의 문서를 모두 구독하여 데이터를 교차 검증합니다.
+        const prizeDocRef = doc(db, "bowling_event", "prizes");
+        const teamsDocRef = doc(db, "bowling_event", "teams");
+        const resultsDocRef = doc(db, "bowling_event", "round2_results");
 
-        // 기기 고유 ID 발급 (브라우저를 껐다 켜도 동일 기기 식별)
         if (!localStorage.getItem('myDeviceId')) {
             localStorage.setItem('myDeviceId', 'dev_' + new Date().getTime() + '_' + Math.random().toString(36).substr(2, 5));
         }
@@ -83,9 +80,10 @@
 
         window.boxesData = null;
         window.winnersData = []; 
+        window.validNames = [];  // 1차전 참여자 명단
+        window.userRanks = {};   // 2차전 최종 등수 명단
         const appDiv = document.getElementById('app');
 
-        // [핵심 방어 함수] 당첨 내역이 있다면 화면 이동을 강제로 막고 결과창만 띄움
         window.checkAndEnforceDrawnState = function() {
             const savedResult = localStorage.getItem('myDrawResult');
             if (savedResult) {
@@ -96,8 +94,27 @@
             return false;
         };
 
-        // 서버 감시 및 데이터 동기화
-        onSnapshot(docRef, (docSnap) => {
+        // [구독 1] 1차전 팀 명단 (유효한 닉네임 검사용)
+        onSnapshot(teamsDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const cards = docSnap.data().cards;
+                let names = [];
+                for(let i=1; i<=16; i++) {
+                    if(cards[i] && cards[i].owner) names.push(cards[i].owner);
+                }
+                window.validNames = names;
+            }
+        });
+
+        // [구독 2] 2차전 최종 결과 (등수 기반 박스 매칭용)
+        onSnapshot(resultsDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+                window.userRanks = docSnap.data().rankData || {};
+            }
+        });
+
+        // [구독 3] 현재 상품 데이터
+        onSnapshot(prizeDocRef, (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 window.boxesData = data.boxes;
@@ -106,7 +123,6 @@
                 const serverResetTime = data.lastReset || 0;
                 const localResetTime = localStorage.getItem('lastResetTime') || 0;
                 
-                // 관리자 전체 초기화 시 로컬 기록 완벽 소거
                 if (serverResetTime > localResetTime) {
                     localStorage.removeItem('myDrawResult');
                     localStorage.removeItem('myNickname');
@@ -115,26 +131,25 @@
                     localStorage.setItem('lastResetTime', serverResetTime);
                 }
                 
-                // 뷰 라우팅 방어
                 if (window.currentView === 'admin') {
                     window.renderAdminScreen();
                 } else if (!window.checkAndEnforceDrawnState()) {
                     if (!window.currentView || window.currentView === 'loading' || window.currentView === 'home') {
                         window.renderHomeScreen();
-                    } else if (window.currentView === 'team_select') {
-                        window.renderTeamSelectScreen();
+                    } else if (window.currentView === 'box_select') {
+                        window.renderBoxSelectScreen();
                     } else if (window.currentView === 'draw' && window.selectedBoxId) {
                         window.renderDrawScreen(window.selectedBoxId);
                     }
                 }
             } else {
-                setDoc(docRef, { boxes: initialBoxes, winners: [], lastReset: new Date().getTime() });
+                setDoc(prizeDocRef, { boxes: initialBoxes, winners: [], lastReset: new Date().getTime() });
             }
         });
 
-        // 1. 홈 화면 (닉네임 입력란)
+        // 1. 홈 화면
         window.renderHomeScreen = function() {
-            if (window.checkAndEnforceDrawnState()) return; // 꼼수 차단
+            if (window.checkAndEnforceDrawnState()) return; 
             
             window.currentView = 'home';
             const savedNick = localStorage.getItem('myNickname') || '';
@@ -159,7 +174,7 @@
             `;
         };
 
-        // 1-1. 닉네임 교차 검증 (다른 사람이 이 기기로, 혹은 같은 이름으로 중복 시도하는 것 완벽 방어)
+        // 1-1. 닉네임 교차 검증 (1, 2번 앱 데이터와 완벽 연동)
         window.checkNicknameAndStart = function() {
             const nick = document.getElementById('nickInput').value.trim();
             const myDeviceId = localStorage.getItem('myDeviceId');
@@ -169,13 +184,24 @@
                 document.getElementById('nickInput').focus();
                 return;
             }
+
+            // 🛡️ [조건 1] 1차전 참여 명단에 있는지 확인
+            if (!window.validNames.includes(nick)) {
+                alert(`"${nick}"님은 1차전 팀 배정 명단에 없습니다.\n띄어쓰기 등 이름을 정확하게 입력했는지 확인해주세요.`);
+                return;
+            }
+
+            // 🛡️ [조건 2] 2차전 최종 점수 및 등수 결과가 있는지 확인
+            const myRank = window.userRanks[nick];
+            if (!myRank) {
+                alert("아직 2차전 최종 순위가 서버에 등록되지 않았습니다.\n잠시 후 다시 시도해주세요.");
+                return;
+            }
             
-            // 🛡️ 당첨자 명단에서 이름이나 기기 ID 조회
+            // 기존 당첨 기록이 있는지 확인 (중복 뽑기 방지)
             const alreadyWonRecord = window.winnersData.find(w => w.nickname === nick || w.deviceId === myDeviceId);
             if (alreadyWonRecord) {
                 alert(`[중복 차단] 이미 참여 완료된 이름이거나 기기입니다.\n${alreadyWonRecord.nickname}님의 기존 당첨 결과를 불러옵니다. 😎`);
-                
-                // 기존 당첨 결과 로컬에 강제 복구 및 화면 이동
                 const recoveredPrize = { name: alreadyWonRecord.prizeName, icon: alreadyWonRecord.prizeIcon, type: 'good' };
                 localStorage.setItem('myNickname', alreadyWonRecord.nickname);
                 localStorage.setItem('myDrawResult', JSON.stringify({ boxTitle: alreadyWonRecord.boxTitle, prize: recoveredPrize }));
@@ -184,15 +210,16 @@
             }
 
             localStorage.setItem('myNickname', nick);
-            window.renderTeamSelectScreen();
+            window.renderBoxSelectScreen();
         };
 
-        // 2. 팀 선택 화면
-        window.renderTeamSelectScreen = function() {
-            if (window.checkAndEnforceDrawnState()) return; // 꼼수 차단
+        // 2. 본인 등수에 맞는 상자 선택 화면
+        window.renderBoxSelectScreen = function() {
+            if (window.checkAndEnforceDrawnState()) return;
             
-            window.currentView = 'team_select';
+            window.currentView = 'box_select';
             const myNick = localStorage.getItem('myNickname');
+            const myRank = window.userRanks[myNick]; // 1~4 등수 자동 추출
 
             let html = `
                 <div class="fade-in pb-10">
@@ -202,12 +229,17 @@
                         </svg>
                         <span class="text-sm font-bold font-sans">메인으로</span>
                     </button>
-                    <h2 class="text-3xl title-font text-white mb-2 tracking-wide">팀을 골라주세요.</h2>
-                    <p class="text-slate-400 text-sm mb-8 font-medium"><span class="text-pink-400 font-bold">${myNick}</span>님, 본인 팀의 카드를 터치하세요.</p>
+                    <h2 class="text-3xl title-font text-white mb-2 tracking-wide">수고하셨습니다!</h2>
+                    <p class="text-slate-400 text-sm mb-8 font-medium leading-relaxed">
+                        <span class="text-pink-400 font-bold">${myNick}</span>님의 소속팀은 <span class="text-yellow-400 font-black">최종 ${myRank}위</span> 입니다.<br>
+                        해당하는 등수의 상자를 터치하여 상품을 뽑아주세요.
+                    </p>
                     <div class="grid grid-cols-1 gap-4">
             `;
-            for (let i = 1; i <= 4; i++) {
-                const box = window.boxesData[i];
+            
+            // 🔥 [핵심 기능] 본인 등수에 해당하는 박스 1개만 가져와서 출력
+            const box = window.boxesData[myRank];
+            if (box) {
                 const count = box.prizes.length;
                 const isEmpty = count === 0;
                 
@@ -216,7 +248,7 @@
                 const displayEmoji = box.emoji || fallbackEmoji;
 
                 html += `
-                    <div onclick="${isEmpty ? '' : `window.renderDrawScreen(${i})`}" 
+                    <div onclick="${isEmpty ? '' : `window.renderDrawScreen(${myRank})`}" 
                          class="relative rounded-2xl p-6 shadow-xl border border-white/5 transition-all ${isEmpty ? 'bg-slate-800/40 opacity-40 grayscale' : box.colorClass + ' cursor-pointer hover:scale-[1.02] active:scale-95'}">
                         <div class="flex justify-between items-center">
                             <div>
@@ -229,13 +261,16 @@
                         </div>
                     </div>
                 `;
+            } else {
+                html += `<div class="text-slate-500 text-center py-4 font-bold">해당하는 상품 박스를 찾을 수 없습니다.</div>`;
             }
+
             appDiv.innerHTML = html + `</div></div>`;
         };
 
-        // 3. 뽑기 화면
+        // 3. 뽑기 실행 화면
         window.renderDrawScreen = function(boxId) {
-            if (window.checkAndEnforceDrawnState()) return; // 꼼수 차단
+            if (window.checkAndEnforceDrawnState()) return;
             
             window.currentView = 'draw';
             window.selectedBoxId = boxId;
@@ -247,11 +282,11 @@
 
             appDiv.innerHTML = `
                 <div class="flex-1 flex flex-col justify-center items-center text-center fade-in">
-                    <button onclick="window.renderTeamSelectScreen()" class="absolute top-8 left-6 flex items-center gap-2 bg-slate-800/80 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-full border border-slate-700 transition-all text-sm font-bold shadow-lg font-sans">
+                    <button onclick="window.renderBoxSelectScreen()" class="absolute top-8 left-6 flex items-center gap-2 bg-slate-800/80 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-full border border-slate-700 transition-all text-sm font-bold shadow-lg font-sans">
                         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
                         </svg>
-                        팀 다시 고르기
+                        상자 다시 보기
                     </button>
                     <h2 class="text-2xl title-font ${box.colorClass.replace('bg-', 'text-')} mb-8 drop-shadow-md">${displayEmoji} ${cleanTitle}</h2>
                     <div id="drawBox" class="text-[120px] mb-12 cursor-pointer drop-shadow-2xl transition-transform hover:scale-110 active:scale-90 shake" onclick="window.executeDraw(${boxId})">🎁</div>
@@ -263,7 +298,7 @@
             `;
         };
 
-        // 4. 추첨 실행 트랜잭션 (서버단 최종 방어)
+        // 4. 추첨 서버 통신
         window.executeDraw = async function(boxId) {
             if (window.checkAndEnforceDrawnState()) return;
 
@@ -276,11 +311,10 @@
 
             try {
                 const selectedPrize = await runTransaction(db, async (transaction) => {
-                    const sfDoc = await transaction.get(docRef);
+                    const sfDoc = await transaction.get(prizeDocRef);
                     let latestData = sfDoc.data().boxes;
                     let winnersList = sfDoc.data().winners || [];
                     
-                    // 🛡️ 트랜잭션 방어: 서버 기록과 실시간 매칭
                     const alreadyWon = winnersList.find(w => w.nickname === myNick || w.deviceId === myDeviceId);
                     if (alreadyWon) throw { type: "ALREADY_WON", record: alreadyWon };
                     
@@ -294,14 +328,14 @@
                     const cleanTitle = latestData[boxId].title.replace(/🥇|🥈|🥉|🏅|4️⃣|😅|📦/g, '').trim(); 
                     winnersList.unshift({
                         nickname: myNick,
-                        deviceId: myDeviceId, // 기기 ID 저장
+                        deviceId: myDeviceId,
                         boxTitle: cleanTitle,
                         prizeName: prize.name,
                         prizeIcon: prize.icon,
                         timestamp: new Date().getTime()
                     });
 
-                    transaction.update(docRef, { boxes: latestData, winners: winnersList });
+                    transaction.update(prizeDocRef, { boxes: latestData, winners: winnersList });
                     return prize;
                 });
 
@@ -314,7 +348,7 @@
                 boxElement.classList.remove('executing');
                 if (e.type === "EMPTY") { 
                     alert("방금 전 상품이 모두 소진되었습니다."); 
-                    window.renderTeamSelectScreen(); 
+                    window.renderBoxSelectScreen(); 
                 }
                 else if (e.type === "ALREADY_WON") {
                     alert("이 기기 또는 이름으로 이미 당첨된 기록이 있습니다! 기존 당첨 결과를 불러옵니다. 😎");
@@ -326,7 +360,7 @@
             }
         };
 
-        // 5. 결과 확인 화면
+        // 5. 최종 당첨 결과 화면
         window.renderResultScreen = function(boxTitle, selectedPrize, isAlreadyDrawn) {
             window.currentView = 'result';
             const myNick = localStorage.getItem('myNickname') || '고객';
@@ -358,20 +392,12 @@
                             지금 바로 <span class="text-yellow-400 font-bold">기획자</span>에게 보여주시고
                             푸짐한 실물 상품을 수령하세요!
                         </p>
-                        <div class="mt-2 flex items-center justify-center gap-1 bg-white/10 px-4 py-2 rounded-full border border-white/10">
-                            <span class="text-pink-400">✨</span>
-                            <span class="text-xs font-bold text-slate-400 font-sans tracking-tight uppercase">Present For You</span>
-                            <span class="text-pink-400">✨</span>
-                        </div>
                     </div>
                 </div>
             `;
         };
 
-        // ============================================
-        // 🛠️ 관리자 모드 전용 로직
-        // ============================================
-
+        // 관리자 모드
         window.enterAdminMode = function() {
             const pw = prompt("관리자 비밀번호를 입력하세요.");
             if (pw === "0000") {
@@ -381,9 +407,8 @@
             }
         };
 
-        // [중요 수정] 관리자 화면 닫을 때 메인화면 강제 이동 차단, 결과창 유무에 따라 라우팅
         window.closeAdminScreen = function() {
-            window.currentView = null; // 초기화
+            window.currentView = null;
             if (!window.checkAndEnforceDrawnState()) {
                 window.renderHomeScreen();
             }
@@ -391,7 +416,6 @@
 
         window.renderAdminScreen = function() {
             window.currentView = 'admin';
-            
             let listHTML = '';
             
             for (let i = 1; i <= 4; i++) {
@@ -399,9 +423,7 @@
                 const cleanTitle = originalBox.title.replace(/🥇|🥈|🥉|🏅|4️⃣|😅|📦/g, '').trim();
                 
                 const prizeCounts = {};
-                originalBox.prizes.forEach(p => {
-                    prizeCounts[p.name] = (prizeCounts[p.name] || 0) + 1;
-                });
+                originalBox.prizes.forEach(p => { prizeCounts[p.name] = (prizeCounts[p.name] || 0) + 1; });
                 const compositionStr = Object.entries(prizeCounts).map(([name, count]) => `${name}(${count})`).join(', ');
 
                 const boxWinners = window.winnersData.filter(w => w.boxTitle === cleanTitle);
@@ -421,17 +443,13 @@
                     <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-700/80 mb-4 flex flex-col shadow-md">
                         <div class="flex justify-between items-center mb-1">
                             <h4 class="text-yellow-400 font-bold text-xl comic-font drop-shadow-md">${originalBox.emoji} ${cleanTitle}</h4>
-                            <span class="text-[10px] font-bold bg-pink-500/20 text-pink-300 px-2 py-1 rounded-md">
-                                ${boxWinners.length}명 당첨
-                            </span>
+                            <span class="text-[10px] font-bold bg-pink-500/20 text-pink-300 px-2 py-1 rounded-md">${boxWinners.length}명 당첨</span>
                         </div>
                         <p class="text-[11px] text-slate-400 mb-3 break-keep bg-slate-800/40 p-2 rounded-lg inline-block">
                             <span class="font-bold text-slate-300">박스 구성 : </span> ${compositionStr}
                         </p>
                         <div class="w-full h-px bg-slate-700/50 mb-3"></div>
-                        <div class="flex flex-wrap gap-2">
-                            ${winnersStr}
-                        </div>
+                        <div class="flex flex-wrap gap-2">${winnersStr}</div>
                     </div>
                 `;
             }
@@ -439,21 +457,17 @@
             appDiv.innerHTML = `
                 <div class="flex-1 flex flex-col w-full fade-in pb-10">
                     <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-2xl title-font text-white flex items-center gap-2"><span class="text-3xl">⚙️</span> 상품 추첨 확인</h2>
-                        <!-- 닫기 버튼 로직 변경 완료 -->
+                        <h2 class="text-2xl title-font text-white flex items-center gap-2"><span class="text-3xl">⚙️</span> 상품 추첨 현황</h2>
                         <button onclick="window.closeAdminScreen()" class="text-slate-400 text-sm hover:text-white bg-slate-800 px-3 py-1 rounded-full border border-slate-700 transition-all shadow-md">닫기 ✖</button>
                     </div>
 
                     <div class="bg-slate-800/80 rounded-2xl border border-slate-700 p-4 mb-6 shadow-xl flex-1 flex flex-col backdrop-blur-sm">
-                        <div class="flex-1 overflow-y-auto no-scrollbar flex flex-col max-h-[55vh]">
-                            ${listHTML}
-                        </div>
+                        <div class="flex-1 overflow-y-auto no-scrollbar flex flex-col max-h-[55vh]">${listHTML}</div>
                     </div>
 
                     <button onclick="window.resetData()" class="w-full bg-red-500/10 text-red-400 border border-red-500/30 py-4 rounded-xl font-bold hover:bg-red-500 hover:text-white transition-all shadow-lg flex justify-center items-center gap-2">
-                        <span>🚨</span> 전체 데이터 초기화
+                        <span>🚨</span> 상품 수량 및 당첨기록 초기화
                     </button>
-                    <p class="text-center text-slate-500 text-[10px] mt-3">초기화 시 서버 수량과 참석자의 접속 기록이 모두 삭제됩니다.</p>
                 </div>
             `;
         };
@@ -461,9 +475,8 @@
         window.resetData = async function() {
             if(confirm("🚨 경고: 모든 데이터(상품 수량 및 당첨 내역)를 초기화하시겠습니까?\n이 작업은 되돌릴 수 없습니다.")) {
                 const newResetTime = new Date().getTime();
-                await setDoc(docRef, { boxes: initialBoxes, winners: [], lastReset: newResetTime });
+                await setDoc(prizeDocRef, { boxes: initialBoxes, winners: [], lastReset: newResetTime });
                 alert("시스템이 완벽하게 초기화되었습니다.");
-                // 초기화 후 메인으로(어차피 데이터 날아가서 꼼수 불가)
                 window.renderHomeScreen();
             }
         };
